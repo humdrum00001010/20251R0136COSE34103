@@ -152,7 +152,12 @@ userinit(void)
   // because the assignment might not be atomic.
   acquire(&ptable.lock);
 
-  p->state = RUNNABLE;
+  // TODO: push init proc to queue
+  // acquire(&lock_queue);
+  // p->state = RUNNABLE;
+  // push_q(p);
+  // release(&lock_queue);
+  // ! The scheduler is called after this function in mpmain so we don't need to sched to enter there.
 
   release(&ptable.lock);
 }
@@ -218,10 +223,11 @@ fork(void)
   pid = np->pid;
 
   acquire(&ptable.lock);
-
-  np->state = RUNNABLE;
   // TODO: transit to sched for a moment? if queue head is changed
-
+  // acquire(&lock_queue);
+  // if (push_q(np)) sched(); // if np is pusehd into queue, changing head
+  // release(&lock_queue);
+  np->state = RUNNABLE;
   release(&ptable.lock);
 
   return pid;
@@ -269,6 +275,9 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   // TODO: pop proc from queue
+  // acquire(&lock_queue);
+  // queue.pop();
+  // release(&lock_queue);
   curproc->state = ZOMBIE;
   sched();
   panic("zombie exit");
@@ -341,6 +350,15 @@ scheduler(void)
     acquire(&ptable.lock);
 
     // TODO: pick one element from ready queue, switch to it, with acquiring lock of queue.
+    // acquire(&lock_queue);
+    // p = queue.front();
+    // queue.pop();
+    // c->proc = p;
+    // switchuvm(p)
+    // swtch(&(c->scheduler), p->context);
+    // switchkvm();
+    // release(&lock_queue);
+    /*
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
@@ -359,6 +377,7 @@ scheduler(void)
       // It should have changed its p->state before coming back.
       c->proc = 0;
     }
+      */
     release(&ptable.lock);
 
   }
@@ -408,6 +427,7 @@ forkret(void)
   static int first = 1;
   // Still holding ptable.lock from scheduler.
   // TODO: release queue lock here
+  // release(&lock_queue);
   release(&ptable.lock);
 
   if (first) {
