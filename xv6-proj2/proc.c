@@ -12,6 +12,8 @@ struct {
   struct proc proc[NPROC];
 } ptable;
 
+// TODO: Implement ready queue, always sorted in ways of priority queue, we won't use maxheap though.
+
 static struct proc *initproc;
 
 int nextpid = 1;
@@ -200,6 +202,7 @@ fork(void)
   }
   np->sz = curproc->sz;
   np->parent = curproc;
+  // TODO: assign some priority to child, based on rule
   *np->tf = *curproc->tf;
 
   // Clear %eax so that fork returns 0 in the child.
@@ -217,6 +220,7 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  // TODO: transit to sched for a moment? if queue head is changed
 
   release(&ptable.lock);
 
@@ -334,6 +338,8 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+
+    // TODO: pick one element from ready queue, switch to it, with acquiring lock of queue.
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
@@ -386,7 +392,7 @@ sched(void)
 // Give up the CPU for one scheduling round.
 void
 yield(void)
-{
+{ // ? Should I implement queue lock here?
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
   sched();
@@ -400,6 +406,7 @@ forkret(void)
 {
   static int first = 1;
   // Still holding ptable.lock from scheduler.
+  // TODO: release queue lock here
   release(&ptable.lock);
 
   if (first) {
@@ -440,6 +447,7 @@ sleep(void *chan, struct spinlock *lk)
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
+  // ? SLEEPING <-> RUNNABLE logic won't our interest?
 
   sched();
 
@@ -489,7 +497,7 @@ kill(int pid)
       p->killed = 1;
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING)
-        p->state = RUNNABLE;
+        p->state = RUNNABLE; // ? KILLED proc should be in queue?
       release(&ptable.lock);
       return 0;
     }
