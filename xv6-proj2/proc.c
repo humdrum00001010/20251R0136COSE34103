@@ -12,7 +12,17 @@ struct {
   struct proc proc[NPROC];
 } ptable;
 
-// TODO: Implement ready queue, always sorted in ways of priority queue, we won't use maxheap though.
+// TODO: Implement ready queue, always being sorted in ways of priority queue, we won't use maxheap though.
+struct ready_queue {
+  struct ready_queue* next;
+  struct proc* c;
+} head, memory_queue[NPROC]; // The head will do nothing than giving memory location.
+
+// TODO: some allocation logic over memory_queue, if c == NULL, the allocator should retrieve that.
+
+// int push_q(struct proc* p);
+// struct proc* pop_q(); gives proc and pop an element from queue. assumes that it is nonempty queue
+// void remove_q(int pid); removes a proc from queue.
 
 static struct proc *initproc;
 
@@ -274,9 +284,9 @@ exit(void)
   }
 
   // Jump into the scheduler, never to return.
-  // TODO: pop proc from queue
+  // TODO: remove proc from queue, not pop, since it can exist outside of queue
   // acquire(&lock_queue);
-  // queue.pop();
+  // remove_q(p->pid);
   // release(&lock_queue);
   curproc->state = ZOMBIE;
   sched();
@@ -351,8 +361,7 @@ scheduler(void)
 
     // TODO: pick one element from ready queue, switch to it, with acquiring lock of queue.
     // acquire(&lock_queue);
-    // p = queue.front();
-    // queue.pop();
+    // p = pop_q();
     // c->proc = p;
     // switchuvm(p)
     // swtch(&(c->scheduler), p->context);
