@@ -268,6 +268,7 @@ exit(void)
   }
 
   // Jump into the scheduler, never to return.
+  // TODO: pop proc from queue
   curproc->state = ZOMBIE;
   sched();
   panic("zombie exit");
