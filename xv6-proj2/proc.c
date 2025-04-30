@@ -52,7 +52,7 @@ void push_q_(struct proc* p, struct ready_queue* q) { // -O2 option required, wo
       return;
     } else {
       if (q->next->c->priority == p->priority) {
-        if (q->next->c->pid > p->pid) {
+        if (q->next->c->pid < p->pid) { // some fix according to the requirement of hw.
           struct ready_queue* q_ = allocate_q(p);
           q_->next = q->next;
           q->next = q_;
@@ -296,7 +296,7 @@ fork(void)
   ///// TODO: transit to sched for a moment? if queue head is changed
   np->state = RUNNABLE;
   push_q(np);
-  if (np->priority < np->parent->priority) {
+  if (np->priority <= np->parent->priority) { // if child's priority is equal, its pid is greater than the parent, so be chosen.
     np->parent->state = RUNNABLE;
     sched();
   }
