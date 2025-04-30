@@ -12,17 +12,75 @@ struct {
   struct proc proc[NPROC];
 } ptable;
 
-// TODO: Implement ready queue, always being sorted in ways of priority queue, we won't use maxheap though.
+///// TODO: Implement ready queue, always being sorted in ways of priority queue, we won't use maxheap though.
 struct ready_queue {
   struct ready_queue* next;
   struct proc* c;
 } head, memory_queue[NPROC]; // The head will do nothing than giving memory location.
 
-// TODO: some allocation logic over memory_queue, if c == NULL, the allocator should retrieve that.
+// ! we didn't need queue locking, instead the proc table locking is doing job for us!
 
-// int push_q(struct proc* p);
-// struct proc* pop_q(); gives proc and pop an element from queue. assumes that it is nonempty queue
-// void remove_q(int pid); removes a proc from queue.
+///// TODO: some allocation logic over memory_queue, if c == NULL, the allocator should retrieve that.
+
+struct ready_queue* allocate_q_(struct proc* p, int i) {
+  if (i >= NPROC) panic("queue overflow");
+  if (memory_queue[i].c == 0) {
+    memory_queue[i].c = p;
+    return &memory_queue[i];
+  }
+  return allocate_q_(p, i + 1);
+}
+
+struct ready_queue* allocate_q(struct proc* p) { // returns ready_queue with proc assigned.
+  return allocate_q_(p, 0);
+}
+
+void free_q(struct ready_queue* q) { // frees the queue
+  q->c = 0;
+  q->next = 0;
+}
+
+void push_q_(struct proc* p, struct ready_queue* q) { // -O2 option required, would?
+  if (!q->next) {
+    q->next = allocate_q(p);
+    return;
+  } else {
+    if (q->next->c->priority > p->priority) {
+      struct ready_queue* q_ = allocate_q(p);
+      q_->next = q->next;
+      q->next = q_;
+      return;
+    } else {
+      if (q->next->c->priority == p->priority) {
+        if (q->next->c->pid > p->pid) {
+          struct ready_queue* q_ = allocate_q(p);
+          q_->next = q->next;
+          q->next = q_;
+          return;
+        } else if (q->next->c->pid == p->pid)
+          panic("proc in ready queue is double");
+      }
+    }
+  }
+
+  push_q_(p, q->next);
+}
+
+void push_q(struct proc* p) { // pushing p and alarms if the top is changed, i thought the signal was mandatory at initial, but it wasn't it never used.
+  push_q_(p, &head);
+}
+
+struct proc* pop_q() {
+  struct proc* p;
+  struct ready_queue* q = 0;
+  if (!head.next) return 0;
+  p = head.next->c;
+  q = head.next;
+  head.next = head.next->next;
+  if (q)
+    free_q(q);
+  return p;
+}
 
 static struct proc *initproc;
 
@@ -162,11 +220,9 @@ userinit(void)
   // because the assignment might not be atomic.
   acquire(&ptable.lock);
 
-  // TODO: push init proc to queue
-  // acquire(&lock_queue);
-  // p->state = RUNNABLE;
-  // push_q(p);
-  // release(&lock_queue);
+  ///// TODO: push init proc to queue
+  p->state = RUNNABLE;
+  push_q(p);
   // ! The scheduler is called after this function in mpmain so we don't need to sched to enter there.
 
   release(&ptable.lock);
@@ -217,7 +273,11 @@ fork(void)
   }
   np->sz = curproc->sz;
   np->parent = curproc;
-  // TODO: assign some priority to child, based on rule
+  ///// TODO: assign some priority to child, based on rule
+  if (np->parent->priority >= 15)
+    np->priority = np->parent->priority / 2;
+  else
+    np->priority = np->parent->priority + 1;
   *np->tf = *curproc->tf;
 
   // Clear %eax so that fork returns 0 in the child.
@@ -233,11 +293,13 @@ fork(void)
   pid = np->pid;
 
   acquire(&ptable.lock);
-  // TODO: transit to sched for a moment? if queue head is changed
-  // acquire(&lock_queue);
-  // if (push_q(np)) sched(); // if np is pusehd into queue, changing head
-  // release(&lock_queue);
+  ///// TODO: transit to sched for a moment? if queue head is changed
   np->state = RUNNABLE;
+  push_q(np);
+  if (np->priority < np->parent->priority) {
+    np->parent->state = RUNNABLE;
+    sched();
+  }
   release(&ptable.lock);
 
   return pid;
@@ -284,12 +346,10 @@ exit(void)
   }
 
   // Jump into the scheduler, never to return.
-  // TODO: remove proc from queue, not pop, since it can exist outside of queue
-  // acquire(&lock_queue);
-  // remove_q(p->pid);
-  // release(&lock_queue);
-  curproc->state = ZOMBIE;
-  sched();
+  ///// TODO: remove proc from queue, not pop, since it can exist outside of queuef
+  // ! The sketch here isn't implemented, it isn't needed.
+  curproc->state = ZOMBIE; // zombie won't return to the ready queue never.
+  sched(); // this will do his job, fetch the top prioritized proc to run.
   panic("zombie exit");
 }
 
@@ -303,14 +363,14 @@ wait(void)
   struct proc *curproc = myproc();
   
   acquire(&ptable.lock);
-  for(;;){
+  for(;;) {
     // Scan through table looking for exited children.
     havekids = 0;
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
       if(p->parent != curproc)
         continue;
       havekids = 1;
-      if(p->state == ZOMBIE){
+      if(p->state == ZOMBIE) {
         // Found one.
         pid = p->pid;
         kfree(p->kstack);
@@ -327,7 +387,7 @@ wait(void)
     }
 
     // No point waiting if we don't have any children.
-    if(!havekids || curproc->killed){
+    if (!havekids || curproc->killed) {
       release(&ptable.lock);
       return -1;
     }
@@ -345,6 +405,7 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+
 void
 scheduler(void)
 {
@@ -359,14 +420,20 @@ scheduler(void)
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
 
-    // TODO: pick one element from ready queue, switch to it, with acquiring lock of queue.
-    // acquire(&lock_queue);
-    // p = pop_q();
-    // c->proc = p;
-    // switchuvm(p)
-    // swtch(&(c->scheduler), p->context);
-    // switchkvm();
-    // release(&lock_queue);
+    ///// TODO: pick one element from ready queue, switch to it, with acquiring lock of queue.
+    p = pop_q();
+    if (p != 0) { // ! busy wait if no proc, does happen if init call printf before shell fork
+      c->proc = p;
+      switchuvm(p);
+      p->state = RUNNING;
+      swtch(&(c->scheduler), p->context);
+      if (p->state == RUNNABLE) // if runnable, don't lose it from queue.
+        push_q(p);
+      switchkvm();
+      
+      c->proc = 0;
+    }
+
     /*
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
@@ -435,8 +502,7 @@ forkret(void)
 {
   static int first = 1;
   // Still holding ptable.lock from scheduler.
-  // TODO: release queue lock here
-  // release(&lock_queue);
+  ///// TODO: release queue lock here
   release(&ptable.lock);
 
   if (first) {
@@ -477,8 +543,8 @@ sleep(void *chan, struct spinlock *lk)
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
-  // ? SLEEPING <-> RUNNABLE logic won't our interest?
-
+  // remove_q(p->pid);
+  
   sched();
 
   // Tidy up.
@@ -499,9 +565,12 @@ wakeup1(void *chan)
 {
   struct proc *p;
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->state == SLEEPING && p->chan == chan) {
       p->state = RUNNABLE;
+      push_q(p);
+    }
+  }
 }
 
 // Wake up all processes sleeping on chan.
@@ -526,8 +595,10 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      if(p->state == SLEEPING) {
         p->state = RUNNABLE; // ? KILLED proc should be in queue?
+        push_q(p);
+      }
       release(&ptable.lock);
       return 0;
     }
